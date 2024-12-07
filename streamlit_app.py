@@ -1,151 +1,76 @@
 import streamlit as st
 import pandas as pd
-import math
-from pathlib import Path
-
-# Set the title and favicon that appear in the Browser's tab bar.
-st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
-)
-
-# -----------------------------------------------------------------------------
-# Declare some useful functions.
-
-@st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
-
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
-    """
-
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
-
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
-
-# -----------------------------------------------------------------------------
-# Draw the actual page
-
-# Set the title that appears at the top of the page.
-'''
-# :earth_americas: GDP dashboard
-
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
-'''
-
-# Add some spacing
-''
-''
-
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
-
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
-
-countries = gdp_df['Country Code'].unique()
-
-if not len(countries):
-    st.warning("Select at least one country")
-
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
-
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
-
-''
-''
+import numpy as np
+import plotly.express as px
+import pickle
+import joblib
+import matplotlib.pyplot as plt
+from sklearn import preprocessing
 
 
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
 
-st.header(f'GDP in {to_year}', divider='gray')
+filename = 'rc_model_2.sav'
+loaded_model = pickle.load(open(filename, 'rb'))
+df = pd.read_csv("cluster_customer_data.csv")
 
-''
 
-cols = st.columns(4)
+st.markdown('<style>body{background-color:f0f0f0;}</style>', unsafe_allow_html=True)
 
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
+st.title("Customer Segmentation using Machine Learning")
 
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
+with st.sidebar:
+    st.title("Input Data")
+    balance = st.number_input("Balance", value=0.0, format="%.6f")
+    balance_frequency = st.number_input("Balance Frequency", value=0.0, format="%.6f")
+    purchases = st.number_input('Purchases', min_value=0.0, format="%.2f")
+    oneoff_purchases = st.number_input('OneOff Purchases', min_value=0.0, format="%.2f")
+    installments_purchases = st.number_input('Installments Purchases', min_value=0.0, format="%.2f")
+    cash_advance = st.number_input('Cash Advance', min_value=0.0, format="%.6f")
+    purchases_frequency = st.number_input('Purchases Frequency', min_value=0.0, step=0.01, format="%.6f")
+    oneoff_purchases_frequency = st.number_input('OneOff Purchases Frequency', min_value=0.0, step=0.01, format="%.6f")
+    purchases_installment_frequency = st.number_input('Purchases Installments Frequency', min_value=0.0, step=0.01, format="%.6f")
+    cash_advance_frequency = st.number_input('Cash Advance Frequency', min_value=0.0, step=0.01, format="%.6f")
+    cash_advance_trx = st.number_input('Cash Advance Trx', format="%d", min_value=0)
+    purchases_trx = st.number_input('Purchases Trx', format="%d", min_value=0)
+    credit_limit = st.number_input('Credit Limit', min_value=0.0, format="%.2f")
+    payments = st.number_input('Payments', min_value=0.0, format="%.6f")
+    minimum_payments = st.number_input('Minimum Payments', min_value=0.0, format="%.6f")
+    prc_full_payment = st.number_input('PRC Full Payment', min_value=0.0, step=0.01, format="%.6f")
+    tenure = st.number_input('Tenure', format="%d", min_value=1)
+    
+    input_data = [[balance, balance_frequency, purchases, oneoff_purchases, installments_purchases,
+                   cash_advance, purchases_frequency, oneoff_purchases_frequency,
+                   purchases_installment_frequency, cash_advance_frequency, cash_advance_trx,
+                   purchases_trx, credit_limit, payments, minimum_payments, prc_full_payment, tenure]] 
+    
+    submitted = st.button("Submit")
 
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
 
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+
+if submitted:
+   
+    cluster_label = loaded_model.predict(input_data)[0]
+    st.success(f'Data belongs to Cluster: {cluster_label}')
+
+
+    cluster_df1 = df[df['Cluster'] == cluster_label]
+
+
+    st.subheader("Details of the selected cluster:")
+    st.write(cluster_df1)
+
+
+    for attribute in cluster_df1.columns:
+
+        hist_fig = px.histogram(cluster_df1, x=attribute, color="Cluster", title=f'Histogram of {attribute}')
+        st.plotly_chart(hist_fig)
+
+    
+       
+
+    fig = px.scatter_3d(cluster_df1, x='BALANCE', y='PURCHASES', z='PAYMENTS', color="Cluster",
+                         title="3D Scatter Plot ( Balance, Purchases, Payments)")
+    st.plotly_chart(fig)
+
+
+   
